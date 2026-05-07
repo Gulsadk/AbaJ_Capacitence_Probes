@@ -1,41 +1,40 @@
 """
-Probe Overlay Web App — Domino Data Lab Edition
-================================================
-Streamlit web application for overlaying multiple verification test
-results of the same capacitance probe over time.
+FScan Verification Web App — Domino Data Lab Edition
+=====================================================
+Flask + Plotly web application for capacitance probe fscan verification.
 
-Upload multiple Excel files (different test dates for the same probe)
-and see them overlaid on a single interactive plot with selectable
-limit bands (Vendor, State 0, State 3).
+Shows uploaded Excel probe data against three limit sets:
+  - Vendor (Hamilton) limits
+  - State 0 custom limits (Good / Okay)
+  - State 3 custom limits (Good / Okay)
 
 Domino:
-    - Runs on port 8888 via app.sh
-    - Launched with: streamlit run app.py --server.port 8888
+    - Runs on port 8888 (Domino default for apps)
+    - Binds to 0.0.0.0
+    - Launched via app.sh
 
 Local:
-    streamlit run app.py
+    python app.py
+    Open http://localhost:8888
 """
 
 import io
+import json
+import os
 import re
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
+import numpy as np
+import plotly
 import plotly.graph_objects as go
-import streamlit as st
-
-# ── Page config ──────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Probe Overlay — Verification Over Time",
-    page_icon="📈",
-    layout="wide",
-)
+from flask import Flask, render_template_string, request, jsonify
 
 # ═════════════════════════════════════════════════════════════════════════
 # Limit definitions
 # ═════════════════════════════════════════════════════════════════════════
 
+# Vendor (Hamilton) limits — symmetric
 VENDOR_LIMITS = {
     300:  (16.00, -16.00),
     374:  (12.23, -12.23),
@@ -57,6 +56,7 @@ VENDOR_LIMITS = {
     9995: ( 5.04,  -5.04),
 }
 
+# State 0 custom limits — asymmetric (70% lower)
 STATE0_LIMITS_GOOD = {
       300: ( 11.59,   -8.11),
       374: (  8.53,   -5.97),
@@ -97,6 +97,7 @@ STATE0_LIMITS_OKAY = {
      9995: (  4.20,   -2.94),
 }
 
+# State 3 custom limits — asymmetric (70% lower), post-e-conditioning
 STATE3_LIMITS_GOOD = {
       300: ( 10.34,   -7.24),
       374: (  7.45,   -5.22),
@@ -137,19 +138,14 @@ STATE3_LIMITS_OKAY = {
      9995: (  3.82,   -2.67),
 }
 
+# Map of limit set key -> (label, limits_dict, color, dash_style)
 LIMIT_SETS = {
-    "Vendor (Hamilton)":  (VENDOR_LIMITS,       "red",       "dash"),
-    "State 0 — Good":    (STATE0_LIMITS_GOOD,  "green",     "dashdot"),
-    "State 0 — Okay":    (STATE0_LIMITS_OKAY,  "orange",    "dot"),
-    "State 3 — Good":    (STATE3_LIMITS_GOOD,  "#1b5e20",   "dashdot"),
-    "State 3 — Okay":    (STATE3_LIMITS_OKAY,  "#e65100",   "dot"),
+    "vendor":      ("Vendor (Hamilton)",  VENDOR_LIMITS,       "red",       "dash"),
+    "state0_good": ("State 0 — Good",    STATE0_LIMITS_GOOD,  "green",     "dashdot"),
+    "state0_okay": ("State 0 — Okay",    STATE0_LIMITS_OKAY,  "orange",    "dot"),
+    "state3_good": ("State 3 — Good",    STATE3_LIMITS_GOOD,  "#1b5e20",   "dashdot"),
+    "state3_okay": ("State 3 — Okay",    STATE3_LIMITS_OKAY,  "#e65100",   "dot"),
 }
-
-TRACE_COLORS = [
-    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
-    "#393b79", "#637939", "#8c6d31", "#843c39",
-]
 
 
 # ── Parser ───────────────────────────────────────────────────────────────
@@ -218,116 +214,28 @@ def parse_fscan_bytes(file_bytes, filename):
     return metadata, freq_averages
 
 
-# ═════════════════════════════════════════════════════════════════════════
-# Streamlit UI
-# ═════════════════════════════════════════════════════════════════════════
+# ── Plotly chart builders ────────────────────────────────────────────────
 
-st.markdown(
-    """
-    <style>
-    .main-header {
-        background: linear-gradient(135deg, #1a237e, #283593);
-        color: white; padding: 16px 24px; border-radius: 10px;
-        margin-bottom: 24px;
-    }
-    .main-header h1 { font-size: 22px; margin: 0; }
-    .main-header p { font-size: 13px; opacity: 0.8; margin: 4px 0 0 0; }
-    </style>
-    <div class="main-header">
-        <h1>Probe Overlay — Verification Over Time</h1>
-        <p>Upload multiple test files for the same probe to overlay results</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+COLORS = [
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+]
 
-# ── Sidebar controls ──
-st.sidebar.header("Settings")
 
-probe_label = st.sidebar.text_input(
-    "Probe label (optional)",
-    placeholder="e.g. Probe 360",
-    help="Used in the plot title. If blank, auto-detected from file metadata.",
-)
-
-selected_limits = st.sidebar.multiselect(
-    "Limit sets to display",
-    options=list(LIMIT_SETS.keys()),
-    default=["Vendor (Hamilton)", "State 0 — Good", "State 3 — Good"],
-)
-
-use_abs = st.sidebar.checkbox("Absolute values", value=False)
-
-# ── File upload ──
-uploaded_files = st.file_uploader(
-    "Upload Excel verification files (same probe, different dates)",
-    type=["xlsx", "xls"],
-    accept_multiple_files=True,
-    help="Upload the model-ready Excel files for one probe. Each file "
-         "represents a different test date.",
-)
-
-if uploaded_files:
-    st.divider()
-
-    # ── Parse all files ──
-    all_results = []
-    errors = []
-
-    for uf in uploaded_files:
-        try:
-            file_bytes = uf.read()
-            meta, freq_avg = parse_fscan_bytes(file_bytes, uf.name)
-            all_results.append((meta, freq_avg))
-        except Exception as e:
-            errors.append(f"{uf.name}: {e}")
-
-    if errors:
-        for err in errors:
-            st.error(err)
-
-    if not all_results:
-        st.warning("No valid files to plot.")
-        st.stop()
-
-    # ── Auto-detect probe label ──
-    if not probe_label:
-        batch_names = [m.get("batch_name", "") for m, _ in all_results if m.get("batch_name")]
-        if batch_names:
-            # Extract probe number from batch name like "360State0_02Mar"
-            match = re.match(r"(\d+)", batch_names[0])
-            probe_label = f"Probe {match.group(1)}" if match else batch_names[0]
-        else:
-            probe_label = "Probe"
-
-    # ── File summary ──
-    with st.expander(f"File Summary — {len(all_results)} file(s)", expanded=False):
-        summary_rows = []
-        for meta, freq_avg in all_results:
-            summary_rows.append({
-                "File": meta.get("filename", "?"),
-                "Sensor S/N": meta.get("sensor_serial", "N/A"),
-                "Batch": meta.get("batch_name", "N/A"),
-                "Date": meta.get("creation_date", "N/A"),
-                "Scans": meta.get("n_measurements", "?"),
-                "Frequencies": len(freq_avg),
-            })
-        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True)
-
-    # ── Build overlay figure ──
+def build_verification_figure(all_results, selected_limits, use_abs=False):
+    """Build Plotly figure with data traces and selected limit bands."""
     fig = go.Figure()
 
-    # Collect all frequencies
     all_freqs = set()
     for _, fa in all_results:
         all_freqs.update(fa.keys())
     all_freqs = sorted(all_freqs)
 
-    # Draw limit bands
-    for limit_name in selected_limits:
-        if limit_name not in LIMIT_SETS:
+    # ── Draw selected limit bands ──
+    for limit_key in selected_limits:
+        if limit_key not in LIMIT_SETS:
             continue
-        limits_dict, color, dash = LIMIT_SETS[limit_name]
+        label, limits_dict, color, dash = LIMIT_SETS[limit_key]
         limit_freqs = [f for f in all_freqs if f in limits_dict]
         if not limit_freqs:
             continue
@@ -339,44 +247,32 @@ if uploaded_files:
             fig.add_trace(go.Scatter(
                 x=limit_freqs, y=upper, mode="lines",
                 line=dict(color=color, width=2, dash=dash),
-                name=limit_name,
+                name=f"{label}",
             ))
         else:
             fig.add_trace(go.Scatter(
                 x=limit_freqs, y=upper, mode="lines",
                 line=dict(color=color, width=2, dash=dash),
-                name=f"{limit_name} (upper)",
+                name=f"{label} (upper)",
             ))
             fig.add_trace(go.Scatter(
                 x=limit_freqs, y=lower, mode="lines",
                 line=dict(color=color, width=2, dash=dash),
-                name=f"{limit_name} (lower)",
+                name=f"{label} (lower)",
                 showlegend=False,
             ))
 
-    # Draw data traces — one per file
+    # ── Draw data traces ──
+    overall_pass = True
     for i, (meta, freq_avg) in enumerate(all_results):
         freqs = sorted(freq_avg.keys())
         values = [abs(freq_avg[f]) if use_abs else freq_avg[f] for f in freqs]
-        color = TRACE_COLORS[i % len(TRACE_COLORS)]
+        color = COLORS[i % len(COLORS)]
 
-        # Build legend label from date / filename
-        date_str = meta.get("creation_date", "")
         label = Path(meta.get("filename", "Unknown")).stem
-        if date_str:
-            # Shorten "02.03.2026 12:47:00" → "02Mar26"
-            parts = date_str.replace(".", " ").replace(":", " ").split()
-            if len(parts) >= 3:
-                months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-                try:
-                    m_idx = int(parts[1])
-                    label = f"{parts[0]}{months[m_idx]}{parts[2][2:]}"
-                except (ValueError, IndexError):
-                    pass
-
+        sensor = meta.get("sensor_serial", "")
         n = meta.get("n_measurements", "?")
-        legend = f"{label} (n={n})"
+        legend = f"{label} — S/N {sensor} (n={n})" if sensor else f"{label} (n={n})"
 
         hover = [f"<b>{label}</b><br>Freq: {f} kHz<br>Cap: {v:.4f} pF/cm"
                  for f, v in zip(freqs, values)]
@@ -389,6 +285,13 @@ if uploaded_files:
             hovertext=hover, hoverinfo="text",
         ))
 
+        # Check pass/fail against vendor limits
+        for f in freqs:
+            if f in VENDOR_LIMITS:
+                u, l = VENDOR_LIMITS[f]
+                if freq_avg[f] > u or freq_avg[f] < l:
+                    overall_pass = False
+
     fig.update_layout(
         xaxis=dict(
             title="Frequency (kHz)", type="log",
@@ -400,69 +303,490 @@ if uploaded_files:
             title="|Capacitance| (pF/cm)" if use_abs else "Capacitance (pF/cm)",
         ),
         title=dict(
-            text=f"{probe_label} — Verification Overlay"
-                 + (" (Absolute)" if use_abs else ""),
+            text="FScan Verification" + (" — Absolute Values" if use_abs else ""),
             font=dict(size=18),
         ),
         legend=dict(x=1.02, y=1, font=dict(size=10)),
         hovermode="closest",
         template="plotly_white",
         margin=dict(l=60, r=300, t=60, b=80),
-        height=650,
+        height=600,
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    status_text = "ALL PASS" if overall_pass else "FAIL DETECTED"
+    status_color = "green" if overall_pass else "red"
+    fig.add_annotation(
+        x=0.99, y=0.99, xref="paper", yref="paper",
+        text=f"<b>Vendor Status: {status_text}</b>",
+        showarrow=False, font=dict(size=14, color="white"),
+        bgcolor=status_color, borderpad=6, opacity=0.9,
+        xanchor="right", yanchor="top",
+    )
 
-    # ── Data table ──
-    with st.expander("Data Table", expanded=False):
-        table_rows = []
-        for meta, freq_avg in all_results:
-            label = Path(meta.get("filename", "Unknown")).stem
-            sensor = meta.get("sensor_serial", "")
-            for freq in sorted(freq_avg.keys()):
-                val = freq_avg[freq]
-                v_u, v_l = VENDOR_LIMITS.get(freq, (None, None))
-                vendor_ok = (v_l <= val <= v_u) if v_u is not None else None
-                s0_u, s0_l = STATE0_LIMITS_GOOD.get(freq, (None, None))
-                s0_ok = (s0_l <= val <= s0_u) if s0_u is not None else None
-                s3_u, s3_l = STATE3_LIMITS_GOOD.get(freq, (None, None))
-                s3_ok = (s3_l <= val <= s3_u) if s3_u is not None else None
+    return fig, overall_pass
 
-                def s(v):
-                    return "PASS" if v else ("FAIL" if v is False else "N/A")
 
-                table_rows.append({
-                    "File": label,
-                    "Sensor": sensor,
-                    "Freq (kHz)": freq,
-                    "Avg Cap (pF/cm)": round(val, 4),
-                    "Vendor": s(vendor_ok),
-                    "State 0": s(s0_ok),
-                    "State 3": s(s3_ok),
-                })
+def build_table_data(all_results):
+    rows = []
+    for meta, freq_avg in all_results:
+        label = Path(meta.get("filename", "Unknown")).stem
+        sensor = meta.get("sensor_serial", "")
+        n = meta.get("n_measurements", "?")
+        for freq in sorted(freq_avg.keys()):
+            val = freq_avg[freq]
+            # Vendor limits
+            v_upper, v_lower = VENDOR_LIMITS.get(freq, (None, None))
+            vendor_pass = (v_lower <= val <= v_upper) if v_upper is not None else None
+            # State 0 Good
+            s0g_upper, s0g_lower = STATE0_LIMITS_GOOD.get(freq, (None, None))
+            s0g_pass = (s0g_lower <= val <= s0g_upper) if s0g_upper is not None else None
+            # State 3 Good
+            s3g_upper, s3g_lower = STATE3_LIMITS_GOOD.get(freq, (None, None))
+            s3g_pass = (s3g_lower <= val <= s3g_upper) if s3g_upper is not None else None
 
-        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, height=400)
+            def status_str(passed):
+                if passed is None:
+                    return "N/A"
+                return "PASS" if passed else "FAIL"
 
-else:
-    st.info("👆 Upload two or more Excel files for the same probe to see the overlay plot.")
+            rows.append({
+                "file": label,
+                "sensor": sensor,
+                "n_scans": n,
+                "freq": freq,
+                "avg_cap": round(val, 4),
+                "vendor": status_str(vendor_pass),
+                "state0": status_str(s0g_pass),
+                "state3": status_str(s3g_pass),
+            })
+    return rows
 
-    with st.expander("ℹ️  How to use"):
-        st.markdown(
-            """
-            1. **Convert raw log data** to model-ready Excel using the
-               CSV-to-Excel converter app (if needed).
-            2. **Upload multiple Excel files** — each from a different
-               verification test date for the same probe.
-            3. The plot overlays all test dates on a single chart with
-               selectable limit bands.
-            4. Use the sidebar to toggle limit sets and absolute values.
-            """
-        )
 
-st.markdown(
-    "<div style='text-align:center; color:#999; font-size:11px; "
-    "margin-top:40px; border-top:1px solid #eee; padding-top:12px;'>"
-    "Probe Overlay — Capacitance Probe Verification Over Time"
-    "</div>",
-    unsafe_allow_html=True,
-)
+# ── Flask app ────────────────────────────────────────────────────────────
+
+app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB limit
+
+HTML_TEMPLATE = r"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FScan Verification</title>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa; color: #333;
+        }
+        header {
+            background: linear-gradient(135deg, #1a237e, #283593);
+            color: white; padding: 16px 32px;
+            display: flex; align-items: center; gap: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        header h1 { font-size: 22px; font-weight: 600; }
+        header span { font-size: 13px; opacity: 0.8; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+        .card {
+            background: white; border-radius: 10px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+            padding: 24px; margin-bottom: 20px;
+        }
+        .card h2 { font-size: 16px; color: #1a237e; margin-bottom: 16px; }
+        .upload-zone {
+            border: 2px dashed #90caf9; border-radius: 10px;
+            padding: 40px; text-align: center; cursor: pointer;
+            transition: all 0.2s; background: #f8fbff;
+        }
+        .upload-zone:hover, .upload-zone.dragging {
+            border-color: #1a237e; background: #e8eaf6;
+        }
+        .upload-zone p { margin: 8px 0; color: #666; }
+        .upload-zone .icon { font-size: 36px; margin-bottom: 8px; }
+        .file-list {
+            display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;
+        }
+        .file-chip {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: #e3f2fd; color: #1565c0; padding: 6px 12px;
+            border-radius: 20px; font-size: 13px;
+        }
+        .file-chip .remove {
+            cursor: pointer; color: #c62828; font-weight: bold;
+            margin-left: 4px;
+        }
+        .controls {
+            display: flex; gap: 12px; align-items: center;
+            flex-wrap: wrap; margin-top: 16px;
+        }
+        button {
+            padding: 10px 24px; border: none; border-radius: 6px;
+            font-size: 14px; font-weight: 600; cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-primary {
+            background: #1a237e; color: white;
+        }
+        .btn-primary:hover { background: #283593; }
+        .btn-primary:disabled { background: #9e9e9e; cursor: default; }
+        .btn-secondary {
+            background: #e0e0e0; color: #333;
+        }
+        .btn-secondary:hover { background: #bdbdbd; }
+        label.toggle {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 13px; cursor: pointer;
+        }
+        .limit-checks {
+            display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px;
+            padding: 12px; background: #fafafa; border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        .limit-checks label {
+            display: inline-flex; align-items: center; gap: 4px;
+            font-size: 13px; cursor: pointer;
+        }
+        .limit-checks .limit-color {
+            display: inline-block; width: 20px; height: 3px;
+            border-radius: 2px; vertical-align: middle;
+        }
+        .spinner {
+            display: inline-block; width: 20px; height: 20px;
+            border: 3px solid #e0e0e0; border-top: 3px solid #1a237e;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #status-msg {
+            font-size: 13px; color: #666; margin-left: 12px;
+        }
+        .plot-container { min-height: 400px; }
+        .meta-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 12px; margin-bottom: 16px;
+        }
+        .meta-item {
+            background: #fafafa; border: 1px solid #e0e0e0;
+            border-radius: 8px; padding: 12px;
+        }
+        .meta-item h3 { font-size: 14px; color: #1a237e; margin-bottom: 6px; }
+        .meta-item p { font-size: 13px; color: #555; margin: 2px 0; }
+        .table-wrap { overflow-x: auto; max-height: 500px; overflow-y: auto; }
+        table {
+            width: 100%; border-collapse: collapse; font-size: 13px;
+        }
+        th {
+            position: sticky; top: 0; background: #1a237e; color: white;
+            padding: 10px 12px; text-align: left; font-weight: 600;
+        }
+        td { padding: 8px 12px; border-bottom: 1px solid #eee; }
+        tr:hover td { background: #f5f5f5; }
+        .status-pass { color: #2e7d32; font-weight: 600; }
+        .status-fail { color: #c62828; font-weight: 600; background: #ffebee; }
+        .tab-bar {
+            display: flex; gap: 0; border-bottom: 2px solid #e0e0e0;
+            margin-bottom: 16px;
+        }
+        .tab-btn {
+            padding: 10px 20px; background: none; border: none;
+            border-bottom: 3px solid transparent;
+            font-size: 14px; font-weight: 600; color: #666;
+            cursor: pointer; transition: all 0.15s;
+        }
+        .tab-btn.active { color: #1a237e; border-bottom-color: #1a237e; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .domino-note {
+            font-size: 11px; color: #999; text-align: center;
+            padding: 12px; border-top: 1px solid #eee; margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div>
+            <h1>FScan Probe Verification</h1>
+            <span>Capacitance probe fscan verification — Vendor + State 0 + State 3 limits</span>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <h2>Upload FScan Excel Files</h2>
+            <div class="upload-zone" id="dropZone">
+                <div class="icon">&#x1F4C2;</div>
+                <p><strong>Drag &amp; drop</strong> Excel files here or <strong>click to browse</strong></p>
+                <p style="font-size:12px; color:#999;">Accepts .xlsx / .xls &mdash; multiple files for overlay</p>
+            </div>
+            <input type="file" id="fileInput" multiple accept=".xlsx,.xls" style="display:none">
+            <div class="file-list" id="fileList"></div>
+
+            <h2 style="margin-top:20px;">Select Limit Sets</h2>
+            <div class="limit-checks">
+                <label>
+                    <input type="checkbox" name="limits" value="vendor" checked>
+                    <span class="limit-color" style="background:red;"></span>
+                    Vendor (Hamilton)
+                </label>
+                <label>
+                    <input type="checkbox" name="limits" value="state0_good" checked>
+                    <span class="limit-color" style="background:green;"></span>
+                    State 0 — Good
+                </label>
+                <label>
+                    <input type="checkbox" name="limits" value="state0_okay">
+                    <span class="limit-color" style="background:orange;"></span>
+                    State 0 — Okay
+                </label>
+                <label>
+                    <input type="checkbox" name="limits" value="state3_good" checked>
+                    <span class="limit-color" style="background:#1b5e20;"></span>
+                    State 3 — Good
+                </label>
+                <label>
+                    <input type="checkbox" name="limits" value="state3_okay">
+                    <span class="limit-color" style="background:#e65100;"></span>
+                    State 3 — Okay
+                </label>
+            </div>
+
+            <div class="controls">
+                <button class="btn-primary" id="genBtn" disabled>Generate Plot</button>
+                <button class="btn-secondary" id="clearBtn">Clear All</button>
+                <label class="toggle">
+                    <input type="checkbox" id="absToggle"> Absolute values
+                </label>
+                <span id="status-msg"></span>
+            </div>
+        </div>
+
+        <div id="results" style="display:none;">
+            <div class="card">
+                <h2>File Summary</h2>
+                <div class="meta-grid" id="metaGrid"></div>
+            </div>
+
+            <div class="card">
+                <div class="tab-bar">
+                    <button class="tab-btn active" data-tab="plotTab">&#x1F4C8; Verification Plot</button>
+                    <button class="tab-btn" data-tab="tableTab">&#x1F4CB; Data Table</button>
+                </div>
+                <div id="plotTab" class="tab-content active">
+                    <div class="plot-container" id="plotDiv"></div>
+                </div>
+                <div id="tableTab" class="tab-content">
+                    <div class="table-wrap" id="tableWrap"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="domino-note">
+            FScan Verification Tool &mdash; Capacitance Probe Analysis
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById("dropZone");
+        const fileInput = document.getElementById("fileInput");
+        const fileList = document.getElementById("fileList");
+        const genBtn = document.getElementById("genBtn");
+        const clearBtn = document.getElementById("clearBtn");
+        const absToggle = document.getElementById("absToggle");
+        const statusMsg = document.getElementById("status-msg");
+        const results = document.getElementById("results");
+
+        let uploadedFiles = [];
+
+        dropZone.addEventListener("click", () => fileInput.click());
+        dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("dragging"); });
+        dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragging"));
+        dropZone.addEventListener("drop", e => {
+            e.preventDefault(); dropZone.classList.remove("dragging");
+            addFiles(e.dataTransfer.files);
+        });
+        fileInput.addEventListener("change", () => { addFiles(fileInput.files); fileInput.value = ""; });
+
+        function addFiles(files) {
+            for (const f of files) {
+                if (!uploadedFiles.some(u => u.name === f.name)) {
+                    uploadedFiles.push(f);
+                }
+            }
+            renderFileList();
+        }
+
+        function renderFileList() {
+            fileList.innerHTML = "";
+            uploadedFiles.forEach((f, i) => {
+                const chip = document.createElement("span");
+                chip.className = "file-chip";
+                chip.textContent = f.name + " ";
+                const rm = document.createElement("span");
+                rm.className = "remove";
+                rm.textContent = "\u2715";
+                rm.dataset.idx = i;
+                rm.addEventListener("click", e => {
+                    uploadedFiles.splice(+e.target.dataset.idx, 1);
+                    renderFileList();
+                });
+                chip.appendChild(rm);
+                fileList.appendChild(chip);
+            });
+            genBtn.disabled = uploadedFiles.length === 0;
+        }
+
+        clearBtn.addEventListener("click", () => {
+            uploadedFiles = [];
+            renderFileList();
+            results.style.display = "none";
+            statusMsg.textContent = "";
+        });
+
+        function getSelectedLimits() {
+            return Array.from(document.querySelectorAll('input[name="limits"]:checked'))
+                        .map(cb => cb.value);
+        }
+
+        genBtn.addEventListener("click", async () => {
+            if (uploadedFiles.length === 0) return;
+            genBtn.disabled = true;
+            statusMsg.innerHTML = '<span class="spinner"></span> Processing\u2026';
+
+            const fd = new FormData();
+            uploadedFiles.forEach(f => fd.append("files", f));
+            fd.append("use_abs", absToggle.checked ? "1" : "0");
+            getSelectedLimits().forEach(l => fd.append("limits", l));
+
+            try {
+                const resp = await fetch("analyze", { method: "POST", body: fd });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.error || "Server error");
+                }
+                const data = await resp.json();
+                renderResults(data);
+                statusMsg.textContent = "Done \u2014 " + data.file_count + " file(s) processed.";
+            } catch (e) {
+                statusMsg.textContent = "Error: " + e.message;
+            } finally {
+                genBtn.disabled = false;
+            }
+        });
+
+        function renderResults(data) {
+            results.style.display = "block";
+            const metaGrid = document.getElementById("metaGrid");
+            metaGrid.innerHTML = "";
+            data.metadata.forEach(m => {
+                const div = document.createElement("div");
+                div.className = "meta-item";
+                div.innerHTML = "<h3>" + (m.filename || "Unknown") + "</h3>"
+                    + "<p><b>Sensor S/N:</b> " + (m.sensor_serial || "N/A") + "</p>"
+                    + "<p><b>Batch:</b> " + (m.batch_name || "N/A") + "</p>"
+                    + "<p><b>Date:</b> " + (m.creation_date || "N/A") + "</p>"
+                    + "<p><b>Valid Scans:</b> " + (m.n_measurements || "?") + "</p>";
+                metaGrid.appendChild(div);
+            });
+
+            const plotData = JSON.parse(data.plot_json);
+            Plotly.newPlot("plotDiv", plotData.data, plotData.layout, {responsive: true});
+
+            renderTable(data.table);
+            results.scrollIntoView({ behavior: "smooth" });
+        }
+
+        function renderTable(rows) {
+            const wrap = document.getElementById("tableWrap");
+            if (!rows || rows.length === 0) { wrap.innerHTML = "<p>No data.</p>"; return; }
+            let html = "<table><thead><tr>"
+                + "<th>File</th><th>Sensor</th><th>Scans</th>"
+                + "<th>Freq (kHz)</th><th>Avg Cap (pF/cm)</th>"
+                + "<th>Vendor</th><th>State 0</th><th>State 3</th>"
+                + "</tr></thead><tbody>";
+            rows.forEach(r => {
+                function cls(s) { return s === "PASS" ? "status-pass" : (s === "FAIL" ? "status-fail" : ""); }
+                html += "<tr>"
+                    + "<td>" + r.file + "</td><td>" + r.sensor + "</td><td>" + r.n_scans + "</td>"
+                    + "<td>" + r.freq + "</td><td>" + r.avg_cap + "</td>"
+                    + "<td class='" + cls(r.vendor) + "'>" + r.vendor + "</td>"
+                    + "<td class='" + cls(r.state0) + "'>" + r.state0 + "</td>"
+                    + "<td class='" + cls(r.state3) + "'>" + r.state3 + "</td>"
+                    + "</tr>";
+            });
+            html += "</tbody></table>";
+            wrap.innerHTML = html;
+        }
+
+        document.querySelectorAll(".tab-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+                document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+                btn.classList.add("active");
+                document.getElementById(btn.dataset.tab).classList.add("active");
+                if (btn.dataset.tab === "plotTab") {
+                    Plotly.Plots.resize(document.getElementById("plotDiv"));
+                }
+            });
+        });
+    </script>
+</body>
+</html>
+"""
+
+
+@app.route("/")
+def index():
+    return render_template_string(HTML_TEMPLATE)
+
+
+@app.route("/analyze", methods=["POST"])
+def analyze():
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "No files uploaded"}), 400
+
+    use_abs = request.form.get("use_abs", "0") == "1"
+    selected_limits = request.form.getlist("limits")
+    if not selected_limits:
+        selected_limits = ["vendor", "state0_good", "state3_good"]
+
+    all_results = []
+    all_metadata = []
+    errors = []
+
+    for f in files:
+        if not f.filename:
+            continue
+        ext = Path(f.filename).suffix.lower()
+        if ext not in (".xlsx", ".xls"):
+            errors.append(f"{f.filename}: invalid file type")
+            continue
+        try:
+            file_bytes = f.read()
+            meta, freq_avg = parse_fscan_bytes(file_bytes, f.filename)
+            all_results.append((meta, freq_avg))
+            all_metadata.append(meta)
+        except Exception as e:
+            errors.append(f"{f.filename}: {str(e)}")
+
+    if not all_results:
+        return jsonify({"error": "No valid files. " + "; ".join(errors)}), 400
+
+    fig, overall_pass = build_verification_figure(all_results, selected_limits, use_abs)
+    table = build_table_data(all_results)
+
+    return jsonify({
+        "file_count": len(all_results),
+        "overall_pass": overall_pass,
+        "metadata": all_metadata,
+        "plot_json": json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder),
+        "table": table,
+        "errors": errors,
+    })
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8888))
+    app.run(host="0.0.0.0", port=port, debug=False)
