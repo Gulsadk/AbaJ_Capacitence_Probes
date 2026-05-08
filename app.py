@@ -578,46 +578,54 @@ elif page == "1️⃣ Convert (CSV → Excel)":
 
     if uploaded_files:
         for uf in uploaded_files:
-            st.write(f"**Processing:** {uf.name} ({uf.size} bytes)")
+            file_bytes = uf.getvalue()
+
+            # Collect ALL output into a list — render once at the end
+            log = []
+            log.append(f"File: {uf.name} ({len(file_bytes)} bytes)")
+
+            excel_data = None
+            excel_name = None
+
             try:
-                file_bytes = uf.getvalue()
-                st.write(f"Read {len(file_bytes)} bytes from upload")
-                out_name, excel_bytes, meta, summary = convert_bytes_to_excel(
+                log.append("Starting conversion...")
+                excel_name, excel_data, meta, summary = convert_bytes_to_excel(
                     file_bytes, uf.name
                 )
-                st.write(f"**Conversion successful!** → `{out_name}` ({len(excel_bytes)} bytes)")
-                st.write(f"Columns: {summary['columns']} · Data rows: {summary['data_rows']} · "
-                         f"Sheet: {summary['sheet_name']} · Verification entries: {summary['verification_entries']}")
+                log.append(f"SUCCESS -> {excel_name} ({len(excel_data)} bytes)")
+                log.append(f"Data rows: {summary['data_rows']}  |  Columns: {summary['columns']}")
+                log.append(f"Sheet: {summary['sheet_name']}")
+                log.append(f"Verification entries: {summary['verification_entries']}")
+                for k, v in meta.items():
+                    log.append(f"  {k}: {v}")
 
-                # Save to output folder
+                # Auto-save
                 try:
                     output_dir = Path(os.environ.get("DOMINO_WORKING_DIR", ".")) / "output"
                     output_dir.mkdir(parents=True, exist_ok=True)
-                    (output_dir / out_name).write_bytes(excel_bytes)
-                    st.write(f"Saved to: `{output_dir / out_name}`")
+                    (output_dir / excel_name).write_bytes(excel_data)
+                    log.append(f"Saved to: {output_dir / excel_name}")
                 except Exception as save_err:
-                    st.write(f"Could not auto-save: {save_err}")
-
-                # Download button
-                st.download_button(
-                    label=f"⬇ Download {out_name}",
-                    data=excel_bytes,
-                    file_name=out_name,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_{uf.name}",
-                )
-
-                # Metadata
-                st.write("**Metadata:**")
-                st.write(meta)
+                    log.append(f"Could not auto-save: {save_err}")
 
             except Exception as e:
-                st.write(f"**ERROR:** {e}")
-                st.code(traceback.format_exc())
+                log.append(f"CONVERSION ERROR: {type(e).__name__}: {e}")
+                log.append(traceback.format_exc())
 
-            st.write("---")
+            # Render everything in ONE st.code block
+            st.code("\n".join(log), language=None)
+
+            # Download button (only if conversion succeeded)
+            if excel_data is not None:
+                st.download_button(
+                    label="Download " + excel_name,
+                    data=excel_data,
+                    file_name=excel_name,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_" + uf.name,
+                )
     else:
-        st.info("👆 Upload one or more raw log data files to begin.")
+        st.info("Upload one or more raw log data files to begin.")
 
 
 # ═════════════════════════════════════════════════════════════════════════
