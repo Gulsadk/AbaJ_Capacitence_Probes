@@ -563,7 +563,7 @@ elif page == "1️⃣ Convert (CSV → Excel)":
         <div style="background:linear-gradient(135deg,#1565c0,#1976d2);
              color:white; padding:16px 24px; border-radius:10px; margin-bottom:20px;">
             <h2 style="margin:0; color:white !important;">Step 1: Convert Raw Log Data → Model-Ready Excel</h2>
-            <p style="margin:4px 0 0 0; opacity:0.85; font-size:13px;">
+            <p style="margin:4px 0 0 0; opacity:0.85; font-size:13px; color:white !important;">
                 Upload CSV or Excel log data exports from the instrument
             </p>
         </div>
@@ -574,98 +574,50 @@ elif page == "1️⃣ Convert (CSV → Excel)":
         type=["csv", "xlsx", "xls"],
         accept_multiple_files=True,
         key="convert_upload",
-        help="Accepts raw CSV exports (with [[HEADER]]/[[EVENTS]]/[[MEASURE]] sections) or raw Excel log files.",
     )
 
     if uploaded_files:
-        st.divider()
-
-        # ── Convert all files ──
-        results = []
-        progress_bar = st.progress(0)
-
-        for i, uf in enumerate(uploaded_files):
+        for uf in uploaded_files:
+            st.write(f"**Processing:** {uf.name} ({uf.size} bytes)")
             try:
-                file_bytes = uf.getvalue()       # always returns full content
+                file_bytes = uf.getvalue()
+                st.write(f"Read {len(file_bytes)} bytes from upload")
                 out_name, excel_bytes, meta, summary = convert_bytes_to_excel(
                     file_bytes, uf.name
                 )
-                results.append({
-                    "status": "ok", "input": uf.name,
-                    "output_name": out_name, "excel_bytes": excel_bytes,
-                    "metadata": meta, "summary": summary,
-                })
-            except Exception as e:
-                results.append({
-                    "status": "error", "input": uf.name,
-                    "error": str(e), "traceback": traceback.format_exc(),
-                })
-            progress_bar.progress((i + 1) / len(uploaded_files))
+                st.write(f"**Conversion successful!** → `{out_name}` ({len(excel_bytes)} bytes)")
+                st.write(f"Columns: {summary['columns']} · Data rows: {summary['data_rows']} · "
+                         f"Sheet: {summary['sheet_name']} · Verification entries: {summary['verification_entries']}")
 
-        ok_results = [r for r in results if r["status"] == "ok"]
-        err_results = [r for r in results if r["status"] == "error"]
+                # Save to output folder
+                try:
+                    output_dir = Path(os.environ.get("DOMINO_WORKING_DIR", ".")) / "output"
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    (output_dir / out_name).write_bytes(excel_bytes)
+                    st.write(f"Saved to: `{output_dir / out_name}`")
+                except Exception as save_err:
+                    st.write(f"Could not auto-save: {save_err}")
 
-        # ── Auto-save to output folder ──
-        try:
-            output_dir = Path(os.environ.get("DOMINO_WORKING_DIR", ".")) / "output"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            for r in ok_results:
-                (output_dir / r["output_name"]).write_bytes(r["excel_bytes"])
-        except Exception:
-            output_dir = None
-
-        # ── Status ──
-        if ok_results:
-            st.success(f"✅ Successfully converted {len(ok_results)} file(s)")
-        if err_results:
-            st.error(f"❌ Failed to convert {len(err_results)} file(s)")
-
-        # ── Download buttons (always visible, top-level) ──
-        if ok_results:
-            st.subheader("Download Converted Files")
-            for idx, r in enumerate(ok_results):
+                # Download button
                 st.download_button(
-                    label=f"⬇ Download {r['output_name']}",
-                    data=r["excel_bytes"],
-                    file_name=r["output_name"],
+                    label=f"⬇ Download {out_name}",
+                    data=excel_bytes,
+                    file_name=out_name,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_{idx}_{r['input']}",
+                    key=f"dl_{uf.name}",
                 )
 
-            if output_dir:
-                st.caption(f"Files also saved to: `{output_dir}`")
+                # Metadata
+                st.write("**Metadata:**")
+                st.write(meta)
 
-        # ── Details per file ──
-        for idx, r in enumerate(ok_results):
-            with st.expander(f"✅  {r['input']}  →  {r['output_name']}"):
-                meta_lines = [f"**{k}:** {v}" for k, v in r["metadata"].items()]
-                st.markdown("  \n".join(meta_lines))
+            except Exception as e:
+                st.write(f"**ERROR:** {e}")
+                st.code(traceback.format_exc())
 
-                s = r["summary"]
-                st.markdown(
-                    f"**Columns:** {s['columns']} · "
-                    f"**Data rows:** {s['data_rows']} · "
-                    f"**Sheet:** {s['sheet_name']} · "
-                    f"**Verification entries:** {s['verification_entries']}"
-                )
-
-        # ── Error details ──
-        for r in err_results:
-            with st.expander(f"❌  {r['input']}  — ERROR", expanded=True):
-                st.error(r["error"])
-                if r.get("traceback"):
-                    st.code(r["traceback"], language="python")
-
-        if ok_results:
-            st.info("Proceed to **Step 2** (Verification Plot) using the sidebar.")
+            st.write("---")
     else:
         st.info("👆 Upload one or more raw log data files to begin.")
-        with st.expander("ℹ️  Supported formats"):
-            st.markdown(
-                """
-                **CSV** with `[[HEADER]]`, `[[EVENTS]]`, `[[MEASURE]]` sections  
-                **Excel** (.xlsx/.xls) with the same layout in the first/Log Data sheet
-                """)
 
 
 # ═════════════════════════════════════════════════════════════════════════
