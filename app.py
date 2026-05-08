@@ -579,86 +579,85 @@ elif page == "1️⃣ Convert (CSV → Excel)":
 
     if uploaded_files:
         st.divider()
+
+        # ── Convert all files ──
         results = []
-        log_lines = []
         progress_bar = st.progress(0)
 
         for i, uf in enumerate(uploaded_files):
-            log_lines.append(f"--- Processing: {uf.name} ({len(uf.getvalue())} bytes) ---")
             try:
-                fb = uf.read()
-                log_lines.append(f"  Read {len(fb)} bytes, calling converter...")
-                out_name, excel_bytes, meta, summary = convert_bytes_to_excel(fb, uf.name)
-                log_lines.append(f"  OK → {out_name} ({len(excel_bytes)} bytes)")
-                log_lines.append(f"  Metadata: {meta}")
-                log_lines.append(f"  Summary: {summary}")
-                results.append({"status": "ok", "input": uf.name, "output_name": out_name,
-                                "excel_bytes": excel_bytes, "metadata": meta, "summary": summary})
+                file_bytes = uf.getvalue()       # always returns full content
+                out_name, excel_bytes, meta, summary = convert_bytes_to_excel(
+                    file_bytes, uf.name
+                )
+                results.append({
+                    "status": "ok", "input": uf.name,
+                    "output_name": out_name, "excel_bytes": excel_bytes,
+                    "metadata": meta, "summary": summary,
+                })
             except Exception as e:
-                tb = traceback.format_exc()
-                log_lines.append(f"  ERROR: {e}")
-                log_lines.append(tb)
-                results.append({"status": "error", "input": uf.name, "error": str(e), "traceback": tb})
+                results.append({
+                    "status": "error", "input": uf.name,
+                    "error": str(e), "traceback": traceback.format_exc(),
+                })
             progress_bar.progress((i + 1) / len(uploaded_files))
 
-        ok = [r for r in results if r["status"] == "ok"]
-        err = [r for r in results if r["status"] == "error"]
+        ok_results = [r for r in results if r["status"] == "ok"]
+        err_results = [r for r in results if r["status"] == "error"]
 
-        # Auto-save to output folder
-        output_dir = Path(os.environ.get("DOMINO_WORKING_DIR", ".")) / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        saved_paths = []
-        for r in ok:
-            p = output_dir / r["output_name"]
-            p.write_bytes(r["excel_bytes"])
-            saved_paths.append(str(p))
-            log_lines.append(f"  Saved: {p}")
+        # ── Auto-save to output folder ──
+        try:
+            output_dir = Path(os.environ.get("DOMINO_WORKING_DIR", ".")) / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            for r in ok_results:
+                (output_dir / r["output_name"]).write_bytes(r["excel_bytes"])
+        except Exception:
+            output_dir = None
 
-        if ok:
-            st.success(f"Converted {len(ok)} file(s)")
-            for sp in saved_paths:
-                st.text(f"  📄 Saved: {sp}")
-        if err:
-            st.error(f"Failed: {len(err)} file(s)")
+        # ── Status ──
+        if ok_results:
+            st.success(f"✅ Successfully converted {len(ok_results)} file(s)")
+        if err_results:
+            st.error(f"❌ Failed to convert {len(err_results)} file(s)")
 
-        for r in ok:
-            with st.expander(f"✅  {r['input']}  →  {r['output_name']}", expanded=True):
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown("**Metadata**")
-                    for k, v in r["metadata"].items(): st.text(f"  {k}: {v}")
-                with c2:
-                    s = r["summary"]
-                    st.markdown("**Summary**")
-                    st.text(f"  Columns: {s['columns']}  |  Data rows: {s['data_rows']}")
-                    st.text(f"  Sheet: {s['sheet_name']}")
-                    st.text(f"  Verification entries: {s['verification_entries']}")
+        # ── Download buttons (always visible, top-level) ──
+        if ok_results:
+            st.subheader("Download Converted Files")
+            for idx, r in enumerate(ok_results):
+                st.download_button(
+                    label=f"⬇ Download {r['output_name']}",
+                    data=r["excel_bytes"],
+                    file_name=r["output_name"],
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_{idx}_{r['input']}",
+                )
 
-                # Preview the converted Excel content
-                with st.expander("Preview converted data"):
-                    try:
-                        preview_xls = pd.ExcelFile(io.BytesIO(r["excel_bytes"]))
-                        for sn in preview_xls.sheet_names:
-                            st.markdown(f"**Sheet: {sn}**")
-                            df_preview = pd.read_excel(preview_xls, sheet_name=sn, header=None)
-                            st.dataframe(df_preview, use_container_width=True, height=250)
-                    except Exception as pe:
-                        st.warning(f"Could not preview: {pe}")
+            if output_dir:
+                st.caption(f"Files also saved to: `{output_dir}`")
 
-                st.download_button(f"⬇ Download {r['output_name']}", r["excel_bytes"],
-                                   r["output_name"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                   key=f"dl_{r['input']}")
-        for r in err:
+        # ── Details per file ──
+        for idx, r in enumerate(ok_results):
+            with st.expander(f"✅  {r['input']}  →  {r['output_name']}"):
+                meta_lines = [f"**{k}:** {v}" for k, v in r["metadata"].items()]
+                st.markdown("  \n".join(meta_lines))
+
+                s = r["summary"]
+                st.markdown(
+                    f"**Columns:** {s['columns']} · "
+                    f"**Data rows:** {s['data_rows']} · "
+                    f"**Sheet:** {s['sheet_name']} · "
+                    f"**Verification entries:** {s['verification_entries']}"
+                )
+
+        # ── Error details ──
+        for r in err_results:
             with st.expander(f"❌  {r['input']}  — ERROR", expanded=True):
                 st.error(r["error"])
                 if r.get("traceback"):
                     st.code(r["traceback"], language="python")
 
-        # Log panel
-        with st.expander("📋 Processing Log", expanded=False):
-            st.code("\n".join(log_lines), language="text")
-
-        st.info("✅ Done! Proceed to **Step 2** (Verification Plot) using the sidebar.")
+        if ok_results:
+            st.info("Proceed to **Step 2** (Verification Plot) using the sidebar.")
     else:
         st.info("👆 Upload one or more raw log data files to begin.")
         with st.expander("ℹ️  Supported formats"):
