@@ -80,11 +80,11 @@ STATE3_LIMITS_OKAY = {
 }
 
 LIMIT_SETS = {
-    "Vendor (Hamilton)": (VENDOR_LIMITS,      "red",     "dash"),
-    "State 0 — Good":   (STATE0_LIMITS_GOOD,  "green",   "dashdot"),
-    "State 0 — Okay":   (STATE0_LIMITS_OKAY,  "orange",  "dot"),
-    "State 3 — Good":   (STATE3_LIMITS_GOOD,  "#1b5e20", "dashdot"),
-    "State 3 — Okay":   (STATE3_LIMITS_OKAY,  "#e65100", "dot"),
+    "VendorLimits":      (VENDOR_LIMITS,      "red",     "dash"),
+    "NewLimits-S0 Good": (STATE0_LIMITS_GOOD,  "orange",  "dashdot"),
+    "NewLimits-S0 Okay": (STATE0_LIMITS_OKAY,  "#e65100", "dot"),
+    "NewLimits-S3 Good": (STATE3_LIMITS_GOOD,  "#1b5e20", "dashdot"),
+    "NewLimits-S3 Okay": (STATE3_LIMITS_OKAY,  "#6a1b9a", "dot"),
 }
 
 TRACE_COLORS = [
@@ -430,9 +430,9 @@ def build_pass_fail_table(all_results):
                 return "PASS" if l <= val <= u else "FAIL"
             rows.append({"File": label, "Sensor": sensor, "Scans": n,
                          "Freq (kHz)": freq, "Avg Cap": round(val, 4),
-                         "Vendor": chk(VENDOR_LIMITS),
-                         "State 0": chk(STATE0_LIMITS_GOOD),
-                         "State 3": chk(STATE3_LIMITS_GOOD)})
+                         "VendorLimits": chk(VENDOR_LIMITS),
+                         "NewLimits-S0": chk(STATE0_LIMITS_GOOD),
+                         "NewLimits-S3": chk(STATE3_LIMITS_GOOD)})
     return pd.DataFrame(rows)
 
 
@@ -504,9 +504,9 @@ if page == "🏠 Home":
                 <p style="font-size:13px; color:#555;">
                     Upload the model-ready Excel file and plot the frequency scan
                     against <b>3 limit sets</b>:<br>
-                    • <span style="color:red;">Vendor (Hamilton)</span><br>
-                    • <span style="color:green;">State 0</span> (Good / Okay)<br>
-                    • <span style="color:#1b5e20;">State 3</span> (Good / Okay)
+                    • <span style="color:red;">VendorLimits</span><br>
+                    • <span style="color:orange;">NewLimits-S0</span> (Good / Okay)<br>
+                    • <span style="color:#1b5e20;">NewLimits-S3</span> (Good / Okay)
                 </p>
             </div>
             """, unsafe_allow_html=True)
@@ -542,11 +542,11 @@ if page == "🏠 Home":
     for freq in sorted(VENDOR_LIMITS.keys()):
         if freq == 897: continue  # skip duplicate
         row = {"Freq (kHz)": freq}
-        row["Vendor ±"] = f"±{VENDOR_LIMITS[freq][0]:.2f}"
+        row["VendorLimits ±"] = f"±{VENDOR_LIMITS[freq][0]:.2f}"
         s0 = STATE0_LIMITS_GOOD.get(freq)
-        if s0: row["State 0 Good"] = f"+{s0[0]:.2f} / {s0[1]:.2f}"
+        if s0: row["NewLimits-S0 Good"] = f"+{s0[0]:.2f} / {s0[1]:.2f}"
         s3 = STATE3_LIMITS_GOOD.get(freq)
-        if s3: row["State 3 Good"] = f"+{s3[0]:.2f} / {s3[1]:.2f}"
+        if s3: row["NewLimits-S3 Good"] = f"+{s3[0]:.2f} / {s3[1]:.2f}"
         ref_data.append(row)
 
     with st.expander("View all limit values"):
@@ -679,7 +679,7 @@ elif page == "2️⃣ Verification Plot":
              color:white; padding:16px 24px; border-radius:10px; margin-bottom:20px;">
             <h2 style="margin:0;">Step 2: FScan Verification Plot</h2>
             <p style="margin:4px 0 0 0; opacity:0.85; font-size:13px;">
-                Plot probe data against Vendor + State 0 + State 3 limits
+                Plot probe data against VendorLimits + NewLimits-S0 + NewLimits-S3
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -687,7 +687,7 @@ elif page == "2️⃣ Verification Plot":
     selected_limits = st.multiselect(
         "Limit sets to display",
         options=list(LIMIT_SETS.keys()),
-        default=["Vendor (Hamilton)", "State 0 — Good", "State 3 — Good"],
+        default=["VendorLimits", "NewLimits-S0 Good", "NewLimits-S3 Good"],
         key="verify_limits",
     )
     use_abs = st.checkbox("Absolute values", key="verify_abs")
@@ -729,7 +729,7 @@ elif page == "2️⃣ Verification Plot":
                     u, l = VENDOR_LIMITS[f]
                     if val > u or val < l: overall_pass = False
         fig.add_annotation(x=0.99, y=0.99, xref="paper", yref="paper",
-            text=f"<b>Vendor: {'ALL PASS' if overall_pass else 'FAIL DETECTED'}</b>",
+            text=f"<b>VendorLimits: {'ALL PASS' if overall_pass else 'FAIL DETECTED'}</b>",
             showarrow=False, font=dict(size=14, color="white"),
             bgcolor="green" if overall_pass else "red", borderpad=6, opacity=0.9,
             xanchor="right", yanchor="top")
@@ -770,7 +770,7 @@ elif page == "3️⃣ Probe Overlay":
     selected_limits = st.multiselect(
         "Limit sets to display",
         options=list(LIMIT_SETS.keys()),
-        default=["Vendor (Hamilton)", "State 0 — Good", "State 3 — Good"],
+        default=["VendorLimits", "NewLimits-S0 Good", "NewLimits-S3 Good"],
         key="overlay_limits",
     )
     use_abs = st.checkbox("Absolute values", key="overlay_abs")
