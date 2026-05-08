@@ -1,27 +1,17 @@
 #!/bin/bash
-# Domino App launcher — Root dispatcher
+# Domino App launcher — Unified Capacitance Probe Tools
 #
-# Set the DOMINO_APP environment variable to choose which app to run:
-#   csv_to_excel       — CSV/Excel log data → model-ready Excel converter
-#   fscan_verification — FScan verification plot (Flask)
-#   overlay            — Probe overlay over time (Streamlit)
-#
-# Default: csv_to_excel
+# Single Streamlit app with landing page + 3 tools:
+#   1. CSV → Excel converter
+#   2. FScan verification plot
+#   3. Probe overlay over time
 
-APP_NAME="${DOMINO_APP:-csv_to_excel}"
-
-echo "=== Starting app: ${APP_NAME} ==="
-
-cd "${APP_NAME}" || { echo "ERROR: App folder '${APP_NAME}' not found"; exit 1; }
-
+echo "=== Installing requirements ==="
 pip install -r requirements.txt --quiet
 
-if [ "$APP_NAME" = "fscan_verification" ]; then
-    python app.py
-else
-    streamlit run app.py \
-        --server.port 8888 \
-        --server.address 0.0.0.0 \
-        --server.headless true \
-        --browser.gatherUsageStats false
-fi
+echo "=== Starting Capacitance Probe Tools ==="
+streamlit run app.py \
+    --server.port 8888 \
+    --server.address 0.0.0.0 \
+    --server.headless true \
+    --browser.gatherUsageStats false
