@@ -14,6 +14,7 @@ echo "=== Starting app: ${APP_NAME} ==="
 
 cd "${APP_NAME}" || { echo "ERROR: App folder '${APP_NAME}' not found"; exit 1; }
 
+pip install -r requirements.txt --quiet --force-reinstall --no-deps
 pip install -r requirements.txt --quiet
 
 if [ "$APP_NAME" = "fscan_verification" ]; then
