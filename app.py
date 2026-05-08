@@ -462,10 +462,10 @@ page = st.sidebar.radio(
 if page == "🏠 Home":
     st.markdown(
         """
-        <div style="background:linear-gradient(135deg,#1a237e,#283593);
+        <div style="background:#C028B9;
              color:white; padding:24px 32px; border-radius:12px; margin-bottom:24px;">
-            <h1 style="margin:0; font-size:28px;">Capacitance Probe Verification Tools</h1>
-            <p style="margin:6px 0 0 0; opacity:0.85; font-size:14px;">
+            <h1 style="margin:0; font-size:28px; color:white !important;">Capacitance Probe Verification Tools</h1>
+            <p style="margin:6px 0 0 0; opacity:0.85; font-size:14px; color:white !important;">
                 End-to-end workflow for converting, verifying, and tracking
                 capacitance probe frequency scan data
             </p>
@@ -562,7 +562,7 @@ elif page == "1️⃣ Convert (CSV → Excel)":
         """
         <div style="background:linear-gradient(135deg,#1565c0,#1976d2);
              color:white; padding:16px 24px; border-radius:10px; margin-bottom:20px;">
-            <h2 style="margin:0;">Step 1: Convert Raw Log Data → Model-Ready Excel</h2>
+            <h2 style="margin:0; color:white !important;">Step 1: Convert Raw Log Data → Model-Ready Excel</h2>
             <p style="margin:4px 0 0 0; opacity:0.85; font-size:13px;">
                 Upload CSV or Excel log data exports from the instrument
             </p>
@@ -677,7 +677,7 @@ elif page == "2️⃣ Verification Plot":
         """
         <div style="background:linear-gradient(135deg,#2e7d32,#388e3c);
              color:white; padding:16px 24px; border-radius:10px; margin-bottom:20px;">
-            <h2 style="margin:0;">Step 2: FScan Verification Plot</h2>
+            <h2 style="margin:0; color:white !important;">Step 2: FScan Verification Plot</h2>
             <p style="margin:4px 0 0 0; opacity:0.85; font-size:13px;">
                 Plot probe data against VendorLimits + NewLimits-S0 + NewLimits-S3
             </p>
@@ -758,7 +758,7 @@ elif page == "3️⃣ Probe Overlay":
         """
         <div style="background:linear-gradient(135deg,#e65100,#f57c00);
              color:white; padding:16px 24px; border-radius:10px; margin-bottom:20px;">
-            <h2 style="margin:0;">Step 3: Probe Overlay — Verification Over Time</h2>
+            <h2 style="margin:0; color:white !important;">Step 3: Probe Overlay — Verification Over Time</h2>
             <p style="margin:4px 0 0 0; opacity:0.85; font-size:13px;">
                 Upload multiple test files for the same probe to track drift
             </p>
