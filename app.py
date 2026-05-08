@@ -12,6 +12,7 @@ Local:   streamlit run app.py
 """
 
 import io
+import logging
 import os
 import re
 import traceback
@@ -22,6 +23,23 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+
+# ── File-based debug logging ─────────────────────────────────────────────
+_log_dir = Path(os.environ.get("DOMINO_WORKING_DIR", ".")) / "output"
+try:
+    _log_dir.mkdir(parents=True, exist_ok=True)
+except Exception:
+    _log_dir = Path(".")
+_log_file = _log_dir / "app_debug.log"
+logging.basicConfig(
+    filename=str(_log_file), level=logging.DEBUG,
+    format="%(asctime)s  %(levelname)-8s  %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("probe_app")
+log.info("=== App startup ===")
+log.info(f"streamlit={st.__version__}, pandas={pd.__version__}, numpy={np.__version__}")
+log.info(f"Log file: {_log_file.resolve()}")
 
 # ── Page config (must be first Streamlit call) ───────────────────────────
 st.set_page_config(
@@ -292,8 +310,13 @@ def build_log_data_sheet(header_lines, event_lines, measure_header, measure_data
             elif col_name == "Culture Time": parsed.append(None if val == "" else val)
             elif col_name == "Status": parsed.append(val)
             else:
-                try: parsed.append(float(val)) if val != "" else parsed.append(None)
-                except ValueError: parsed.append(val)
+                if val == "":
+                    parsed.append(None)
+                else:
+                    try:
+                        parsed.append(float(val))
+                    except ValueError:
+                        parsed.append(val)
         data_rows.append(pad(parsed))
 
     rows.extend(data_rows)
@@ -577,45 +600,51 @@ elif page == "1️⃣ Convert (CSV → Excel)":
     )
 
     if uploaded_files:
-        import traceback as _tb
-
         valid_files = [f for f in uploaded_files if f is not None]
+        log.info(f"Step1: {len(valid_files)} file(s) uploaded")
         st.info(f"Processing {len(valid_files)} file(s)…")
 
         for idx, uf in enumerate(valid_files):
+            # ── Read uploaded bytes ──
             try:
                 file_bytes = uf.getvalue()
                 fname = uf.name
                 fsize = len(file_bytes)
+                log.info(f"  [{idx}] read OK: {fname} ({fsize} bytes)")
             except Exception as e:
+                log.exception(f"  [{idx}] read FAILED")
                 st.error(f"Could not read uploaded file: {e}")
                 continue
 
             st.markdown(f"**File {idx+1}:** `{fname}` ({fsize:,} bytes)")
 
-            # ── Full conversion inside one try/except ──
+            # ── Convert ──
             try:
+                log.info(f"  [{idx}] calling convert_bytes_to_excel…")
                 output_name, excel_bytes, metadata, summary = convert_bytes_to_excel(
                     file_bytes, fname
                 )
+                log.info(f"  [{idx}] convert OK: {output_name}, "
+                         f"{len(excel_bytes)} bytes, "
+                         f"rows={summary['data_rows']}, cols={summary['columns']}")
             except Exception as e:
+                log.exception(f"  [{idx}] convert FAILED")
                 st.error(f"Conversion failed for `{fname}`")
-                st.code(_tb.format_exc(), language="text")
+                st.code(traceback.format_exc(), language="text")
                 continue
 
-            # ── Show results ──
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**Metadata**")
-                for k, v in metadata.items():
-                    st.text(f"  {k}: {v}")
-            with col2:
-                st.markdown("**Summary**")
-                st.text(f"  Columns: {summary['columns']}")
-                st.text(f"  Data rows: {summary['data_rows']}")
-                st.text(f"  Sheet: {summary['sheet_name']}")
-                st.text(f"  Verification entries: {summary['verification_entries']}")
+            # ── Display metadata + summary as plain text block ──
+            info_lines = []
+            for k, v in metadata.items():
+                info_lines.append(f"  {k}: {v}")
+            info_lines.append("")
+            info_lines.append(f"  Columns: {summary['columns']}")
+            info_lines.append(f"  Data rows: {summary['data_rows']}")
+            info_lines.append(f"  Sheet: {summary['sheet_name']}")
+            info_lines.append(f"  Verification entries: {summary['verification_entries']}")
+            st.code("\n".join(info_lines), language="text")
 
+            # ── Download button ──
             st.download_button(
                 label=f"⬇ Download {output_name}",
                 data=excel_bytes,
@@ -623,18 +652,21 @@ elif page == "1️⃣ Convert (CSV → Excel)":
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key=f"dl_{idx}",
             )
+            log.info(f"  [{idx}] download button rendered")
 
             # ── Auto-save (best-effort, never blocks) ──
             try:
                 out_dir = Path(os.environ.get("DOMINO_WORKING_DIR", ".")) / "output"
                 out_dir.mkdir(parents=True, exist_ok=True)
                 (out_dir / output_name).write_bytes(excel_bytes)
+                log.info(f"  [{idx}] saved to {out_dir / output_name}")
             except Exception:
-                pass  # save is optional; download button above is primary
+                log.warning(f"  [{idx}] auto-save failed (non-critical)", exc_info=True)
 
             st.divider()
 
         st.success("Done — use the download buttons above to retrieve files.")
+        log.info("Step1: DONE")
     else:
         st.info("Upload one or more raw log data files to begin.")
 
