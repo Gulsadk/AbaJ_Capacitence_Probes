@@ -577,96 +577,64 @@ elif page == "1️⃣ Convert (CSV → Excel)":
     )
 
     if uploaded_files:
+        import traceback as _tb
+
         valid_files = [f for f in uploaded_files if f is not None]
-        st.text(f"DEBUG: {len(valid_files)} file(s)")
+        st.info(f"Processing {len(valid_files)} file(s)…")
 
         for idx, uf in enumerate(valid_files):
-            file_bytes = uf.getvalue()
-            fname = uf.name
-            st.text(f"DEBUG-A: {fname} = {len(file_bytes)} bytes")
-
-            # Step 1: parse sections
             try:
-                hl, el, mh, mdl = parse_input_sections(file_bytes, fname)
-                st.text(f"DEBUG-B: parsed OK: {len(hl)} header, {len(el)} events, {len(mdl)} measure lines")
-            except BaseException as e:
-                st.text(f"DEBUG-B: FAILED parse_input_sections: {type(e).__name__}: {e}")
+                file_bytes = uf.getvalue()
+                fname = uf.name
+                fsize = len(file_bytes)
+            except Exception as e:
+                st.error(f"Could not read uploaded file: {e}")
                 continue
 
-            # Step 2: metadata
+            st.markdown(f"**File {idx+1}:** `{fname}` ({fsize:,} bytes)")
+
+            # ── Full conversion inside one try/except ──
             try:
-                metadata = build_metadata_dict(hl)
-                st.text(f"DEBUG-C: metadata OK: {list(metadata.keys())}")
-            except BaseException as e:
-                st.text(f"DEBUG-C: FAILED build_metadata_dict: {type(e).__name__}: {e}")
+                output_name, excel_bytes, metadata, summary = convert_bytes_to_excel(
+                    file_bytes, fname
+                )
+            except Exception as e:
+                st.error(f"Conversion failed for `{fname}`")
+                st.code(_tb.format_exc(), language="text")
                 continue
 
-            # Step 3: log data sheet
-            try:
-                columns, all_rows, data_rows = build_log_data_sheet(hl, el, mh, mdl)
-                st.text(f"DEBUG-D: log data OK: {len(columns)} cols, {len(all_rows)} rows, {len(data_rows)} data rows")
-            except BaseException as e:
-                st.text(f"DEBUG-D: FAILED build_log_data_sheet: {type(e).__name__}: {e}")
-                continue
-
-            # Step 4: verification sheet
-            try:
-                vrows = build_verification_sheet(columns, data_rows, metadata)
-                st.text(f"DEBUG-E: verification OK: {len(vrows)} rows")
-            except BaseException as e:
-                st.text(f"DEBUG-E: FAILED build_verification_sheet: {type(e).__name__}: {e}")
-                continue
-
-            # Step 5: sheet name
-            try:
-                cd = metadata.get("Creation Date", "")
-                if cd:
-                    parts = cd.replace(".", " ").replace(":", " ").split()
-                    sheet_name = f"{parts[2]}-{parts[1]}-{parts[0]}_{parts[3]}_{parts[4]}_{parts[5]}_Log Data" if len(parts) >= 6 else Path(fname).stem
-                else:
-                    sheet_name = Path(fname).stem
-                st.text(f"DEBUG-F: sheet_name={sheet_name}")
-            except BaseException as e:
-                st.text(f"DEBUG-F: FAILED sheet_name: {type(e).__name__}: {e}")
-                sheet_name = "data"
-
-            # Step 6: output name
-            bn = metadata.get("Batch name", "").strip()
-            sn = metadata.get("Sensor serial number", "").strip()
-            excel_name = "_".join([bn] + ([f"SN{sn}"] if sn else [])) + ".xlsx" if bn else Path(fname).stem + "_converted.xlsx"
-            st.text(f"DEBUG-G: excel_name={excel_name}")
-
-            # Step 7: write Excel
-            try:
-                buf = io.BytesIO()
-                with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-                    pd.DataFrame(all_rows).to_excel(writer, sheet_name=sheet_name[:31], index=False, header=False)
-                    pd.DataFrame(vrows).to_excel(writer, sheet_name="Verification Plotted", index=False, header=False)
-                buf.seek(0)
-                excel_data = buf.getvalue()
-                st.text(f"DEBUG-H: Excel written OK: {len(excel_data)} bytes")
-            except BaseException as e:
-                st.text(f"DEBUG-H: FAILED ExcelWriter: {type(e).__name__}: {e}")
-                continue
-
-            # Step 8: save + download
-            try:
-                output_dir = Path(os.environ.get("DOMINO_WORKING_DIR", ".")) / "output"
-                output_dir.mkdir(parents=True, exist_ok=True)
-                (output_dir / excel_name).write_bytes(excel_data)
-                st.text(f"DEBUG-I: saved to {output_dir / excel_name}")
-            except BaseException as se:
-                st.text(f"DEBUG-I: save error: {se}")
+            # ── Show results ──
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Metadata**")
+                for k, v in metadata.items():
+                    st.text(f"  {k}: {v}")
+            with col2:
+                st.markdown("**Summary**")
+                st.text(f"  Columns: {summary['columns']}")
+                st.text(f"  Data rows: {summary['data_rows']}")
+                st.text(f"  Sheet: {summary['sheet_name']}")
+                st.text(f"  Verification entries: {summary['verification_entries']}")
 
             st.download_button(
-                label="Download " + excel_name,
-                data=excel_data,
-                file_name=excel_name,
+                label=f"⬇ Download {output_name}",
+                data=excel_bytes,
+                file_name=output_name,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_" + str(idx),
+                key=f"dl_{idx}",
             )
 
-        st.text("DEBUG: === DONE ===")
+            # ── Auto-save (best-effort, never blocks) ──
+            try:
+                out_dir = Path(os.environ.get("DOMINO_WORKING_DIR", ".")) / "output"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                (out_dir / output_name).write_bytes(excel_bytes)
+            except Exception:
+                pass  # save is optional; download button above is primary
+
+            st.divider()
+
+        st.success("Done — use the download buttons above to retrieve files.")
     else:
         st.info("Upload one or more raw log data files to begin.")
 
