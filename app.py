@@ -473,7 +473,7 @@ st.sidebar.markdown(
 
 page = st.sidebar.radio(
     "Navigate",
-    ["🏠 Home", "1️⃣ Convert (CSV → Excel)", "2️⃣ Verification Plot", "3️⃣ Probe Overlay"],
+    ["🏠 Home", "1️⃣ Convert (CSV → Excel)", "2️⃣ Verification Plot", "3️⃣ Drift Check", "4️⃣ Probe Overlay"],
     index=0,
 )
 
@@ -497,21 +497,20 @@ if page == "🏠 Home":
 
     st.markdown("## Workflow")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.markdown(
             """
             <div style="background:#e3f2fd; border-radius:10px; padding:20px;
-                 border-left:4px solid #1565c0; min-height:260px;">
+                 border-left:4px solid #1565c0; min-height:280px;">
                 <h3 style="color:#1565c0; margin-top:0;">Step 1: Convert</h3>
                 <p style="font-size:28px; margin:8px 0;">📁 → 📊</p>
                 <p><b>CSV → Model-Ready Excel</b></p>
                 <p style="font-size:13px; color:#555;">
                     Upload raw CSV or Excel log data exports from the instrument.
-                    The tool parses <code>[[HEADER]]</code>, <code>[[EVENTS]]</code>,
-                    and <code>[[MEASURE]]</code> sections and produces a standardised
-                    Excel workbook with <b>Log Data</b> and <b>Verification Plotted</b> sheets.
+                    Produces a standardised Excel workbook with
+                    <b>Log Data</b> and <b>Verification Plotted</b> sheets.
                 </p>
             </div>
             """, unsafe_allow_html=True)
@@ -520,13 +519,12 @@ if page == "🏠 Home":
         st.markdown(
             """
             <div style="background:#e8f5e9; border-radius:10px; padding:20px;
-                 border-left:4px solid #2e7d32; min-height:260px;">
+                 border-left:4px solid #2e7d32; min-height:280px;">
                 <h3 style="color:#2e7d32; margin-top:0;">Step 2: Verify</h3>
                 <p style="font-size:28px; margin:8px 0;">📊 → 📈</p>
                 <p><b>Plot Against Limits</b></p>
                 <p style="font-size:13px; color:#555;">
-                    Upload the model-ready Excel file and plot the frequency scan
-                    against <b>3 limit sets</b>:<br>
+                    Plot the frequency scan against limit sets:<br>
                     • <span style="color:red;">VendorLimits</span><br>
                     • <span style="color:orange;">NewLimits-S0</span> (Good / Okay)<br>
                     • <span style="color:#1b5e20;">NewLimits-S3</span> (Good / Okay)
@@ -537,16 +535,31 @@ if page == "🏠 Home":
     with col3:
         st.markdown(
             """
+            <div style="background:#fce4ec; border-radius:10px; padding:20px;
+                 border-left:4px solid #c62828; min-height:280px;">
+                <h3 style="color:#c62828; margin-top:0;">Step 3: Drift Check</h3>
+                <p style="font-size:28px; margin:8px 0;">📉 ✓/✗</p>
+                <p><b>Frequency Stability</b></p>
+                <p style="font-size:13px; color:#555;">
+                    Upload raw CSV log files and check whether capacitance
+                    values drift during the scan. For each frequency column,
+                    if <b>max − min &lt; 1 pF/cm</b> → PASS, otherwise FAIL.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+
+    with col4:
+        st.markdown(
+            """
             <div style="background:#fff3e0; border-radius:10px; padding:20px;
-                 border-left:4px solid #e65100; min-height:260px;">
-                <h3 style="color:#e65100; margin-top:0;">Step 3: Overlay</h3>
+                 border-left:4px solid #e65100; min-height:280px;">
+                <h3 style="color:#e65100; margin-top:0;">Step 4: Overlay</h3>
                 <p style="font-size:28px; margin:8px 0;">📈📈📈</p>
                 <p><b>Track Over Time</b></p>
                 <p style="font-size:13px; color:#555;">
                     Upload multiple Excel files for the <b>same probe</b>
                     (different test dates) and overlay all results on a single
-                    interactive chart. Monitor probe drift and degradation
-                    over repeated verification tests.
+                    interactive chart. Monitor drift over time.
                 </p>
             </div>
             """, unsafe_allow_html=True)
@@ -557,7 +570,8 @@ if page == "🏠 Home":
         """
         1. Use the **sidebar** on the left to navigate between tools
         2. Start with **Step 1** if you have raw CSV log files
-        3. If you already have model-ready Excel files, skip to **Step 2** or **Step 3**
+        3. Use **Step 3** to check for measurement drift in raw CSV files
+        4. If you already have model-ready Excel files, skip to **Step 2** or **Step 4**
         """)
 
     st.markdown("### Limit Sets Reference")
@@ -756,7 +770,7 @@ elif page == "2️⃣ Verification Plot":
 # PAGE: Probe Overlay
 # ═════════════════════════════════════════════════════════════════════════
 
-elif page == "3️⃣ Probe Overlay":
+elif page == "4️⃣ Probe Overlay":
     st.markdown(
         """
         <div style="background:linear-gradient(135deg,#e65100,#f57c00);
@@ -857,6 +871,187 @@ elif page == "3️⃣ Probe Overlay":
                 1. **Convert** raw log data to Excel using Step 1 (if needed)
                 2. **Upload** multiple Excel files — each from a different test date for the same probe
                 3. The chart overlays all dates with selectable limit bands
+                """)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# PAGE: Drift Check
+# ═════════════════════════════════════════════════════════════════════════
+
+elif page == "3️⃣ Drift Check":
+    st.markdown(
+        """
+        <div style="background:linear-gradient(135deg,#c62828,#d32f2f);
+             color:white; padding:16px 24px; border-radius:10px; margin-bottom:20px;">
+            <h2 style="margin:0; color:white !important;">Step 3: Drift Check — Frequency Stability</h2>
+            <p style="margin:4px 0 0 0; opacity:0.85; font-size:13px; color:white !important;">
+                Check whether capacitance values drift during measurement collection
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    DRIFT_THRESHOLD = 1.0  # pF/cm
+
+    st.markdown(
+        f"For each frequency column, compute **max − min** across all measurement rows.  \n"
+        f"If the range is **< {DRIFT_THRESHOLD} pF/cm** → **PASS** (stable).  \n"
+        f"If the range is **≥ {DRIFT_THRESHOLD} pF/cm** → **FAIL** (drift detected)."
+    )
+
+    uploaded_files = st.file_uploader(
+        "Upload raw CSV log data files",
+        type=["csv"],
+        accept_multiple_files=True,
+        key="drift_upload",
+    )
+
+    if uploaded_files:
+        valid_files = [f for f in uploaded_files if f is not None]
+        log.info(f"DriftCheck: {len(valid_files)} file(s) uploaded")
+
+        all_summaries = []
+
+        for idx, uf in enumerate(valid_files):
+            fname = uf.name
+            file_bytes = uf.getvalue()
+            log.info(f"  DriftCheck [{idx}] {fname} ({len(file_bytes)} bytes)")
+
+            # Parse CSV measure data from bytes
+            try:
+                text = None
+                for enc in ("utf-8-sig", "latin-1", "cp1252"):
+                    try:
+                        text = file_bytes.decode(enc)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                if text is None:
+                    raise ValueError(f"Could not decode {fname}")
+
+                lines = [l.strip() for l in text.splitlines()
+                         if not l.strip().startswith("sep=")]
+                in_measure = False
+                header_line = None
+                data_lines = []
+                for line in lines:
+                    if line == "[[MEASURE]]":
+                        in_measure = True
+                        continue
+                    if line.startswith("[[") and line.endswith("]]"):
+                        in_measure = False
+                        continue
+                    if not in_measure or not line:
+                        continue
+                    if header_line is None:
+                        header_line = line
+                    else:
+                        data_lines.append(line)
+
+                if header_line is None:
+                    raise ValueError(f"No [[MEASURE]] section found in {fname}")
+
+                from io import StringIO
+                csv_text = "\n".join([header_line] + data_lines)
+                df = pd.read_csv(StringIO(csv_text))
+            except Exception as e:
+                log.exception(f"  DriftCheck [{idx}] parse FAILED")
+                st.error(f"Could not parse `{fname}`: {e}")
+                continue
+
+            # Find frequency columns
+            freq_cols = [c for c in df.columns if re.match(r"C\(\d+kHz\)", c)]
+            if not freq_cols:
+                st.warning(f"`{fname}`: No frequency columns found.")
+                continue
+
+            # Compute drift for each frequency
+            results = []
+            for col in freq_cols:
+                values = pd.to_numeric(df[col], errors="coerce").dropna()
+                if len(values) == 0:
+                    results.append({"Frequency": col, "Min": None, "Max": None,
+                                    "Range (pF/cm)": None, "Result": "NO DATA"})
+                    continue
+                vmin = values.min()
+                vmax = values.max()
+                vrange = vmax - vmin
+                results.append({
+                    "Frequency": col,
+                    "Min": round(vmin, 4),
+                    "Max": round(vmax, 4),
+                    "Range (pF/cm)": round(vrange, 4),
+                    "Result": "PASS" if vrange < DRIFT_THRESHOLD else "FAIL",
+                })
+
+            n_pass = sum(1 for r in results if r["Result"] == "PASS")
+            n_fail = sum(1 for r in results if r["Result"] == "FAIL")
+            overall = "PASS" if n_fail == 0 else "FAIL"
+            log.info(f"  DriftCheck [{idx}] {overall}: {n_pass} pass, {n_fail} fail")
+
+            all_summaries.append({
+                "File": fname, "Measurements": len(df),
+                "Frequencies": len(freq_cols),
+                "Pass": n_pass, "Fail": n_fail, "Overall": overall,
+            })
+
+            # Display per-file results
+            if overall == "PASS":
+                st.success(f"**{fname}** — PASS ({n_pass}/{len(results)} frequencies stable)")
+            else:
+                st.error(f"**{fname}** — FAIL ({n_fail}/{len(results)} frequencies exceed threshold)")
+
+            df_results = pd.DataFrame(results)
+
+            def highlight_result(val):
+                if val == "PASS":
+                    return "background-color: #c8e6c9; color: #1b5e20; font-weight: bold"
+                elif val == "FAIL":
+                    return "background-color: #ffcdd2; color: #b71c1c; font-weight: bold"
+                return ""
+
+            styled = df_results.style.applymap(
+                highlight_result, subset=["Result"]
+            )
+            st.dataframe(styled, use_container_width=True, hide_index=True)
+            st.divider()
+
+        # Overall summary table
+        if len(all_summaries) > 1:
+            st.markdown("### Summary")
+            df_summary = pd.DataFrame(all_summaries)
+
+            def highlight_overall(val):
+                if val == "PASS":
+                    return "background-color: #c8e6c9; color: #1b5e20; font-weight: bold"
+                elif val == "FAIL":
+                    return "background-color: #ffcdd2; color: #b71c1c; font-weight: bold"
+                return ""
+
+            styled_summary = df_summary.style.applymap(
+                highlight_overall, subset=["Overall"]
+            )
+            st.dataframe(styled_summary, use_container_width=True, hide_index=True)
+
+        total_pass = sum(1 for s in all_summaries if s["Overall"] == "PASS")
+        total_fail = sum(1 for s in all_summaries if s["Overall"] == "FAIL")
+        if total_fail == 0 and all_summaries:
+            st.success(f"All {total_pass} file(s) passed drift check.")
+        elif total_fail > 0:
+            st.warning(f"{total_fail} of {len(all_summaries)} file(s) have drifting frequencies.")
+    else:
+        st.info("Upload one or more raw CSV log data files to check for drift.")
+        with st.expander("ℹ️  How it works"):
+            st.markdown(
+                f"""
+                For each frequency column `C(300kHz)` through `C(9995kHz)`:
+
+                1. Collect all measurement values across the scan
+                2. Compute **max − min**
+                3. If range **< {DRIFT_THRESHOLD} pF/cm** → **PASS** (no drift)
+                4. If range **≥ {DRIFT_THRESHOLD} pF/cm** → **FAIL** (drift detected)
+
+                Lower frequencies (300–896 kHz) tend to show more drift than higher
+                frequencies, which is expected behavior.
                 """)
 
 
