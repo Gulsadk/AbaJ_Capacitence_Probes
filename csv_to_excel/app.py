@@ -14,6 +14,7 @@ Local:
 """
 
 import io
+import os
 import re
 from datetime import time as dt_time
 from pathlib import Path
@@ -434,8 +435,22 @@ if uploaded_files:
     success_count = sum(1 for r in results if r["status"] == "success")
     error_count = sum(1 for r in results if r["status"] == "error")
 
+    # ── Auto-save to Domino output folder ──
+    output_dir = Path(os.environ.get("DOMINO_WORKING_DIR", ".")) / "output"
+    if not output_dir.exists():
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_files = []
+    for r in [r for r in results if r["status"] == "success"]:
+        out_path = output_dir / r["output_name"]
+        out_path.write_bytes(r["excel_bytes"])
+        saved_files.append(str(out_path))
+
     if success_count > 0:
         st.success(f"Successfully converted {success_count} file(s)")
+        st.info(f"Files saved to: `{output_dir}/`")
+        for sf in saved_files:
+            st.text(f"  📄 {sf}")
     if error_count > 0:
         st.error(f"Failed to convert {error_count} file(s)")
 
