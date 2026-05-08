@@ -577,53 +577,52 @@ elif page == "1️⃣ Convert (CSV → Excel)":
     )
 
     if uploaded_files:
-        for uf in uploaded_files:
-            file_bytes = uf.getvalue()
+        # DEBUG: show exactly what uploaded_files contains
+        st.text(f"DEBUG: uploaded_files type={type(uploaded_files).__name__}, len={len(uploaded_files)}")
+        for idx, uf in enumerate(uploaded_files):
+            st.text(f"DEBUG: file[{idx}] type={type(uf).__name__}, value={uf}")
 
-            # Collect ALL output into a list — render once at the end
-            log = []
-            log.append(f"File: {uf.name} ({len(file_bytes)} bytes)")
+        # Filter out None entries if any
+        valid_files = [f for f in uploaded_files if f is not None]
+        st.text(f"DEBUG: valid_files count={len(valid_files)}")
 
-            excel_data = None
-            excel_name = None
-
-            try:
-                log.append("Starting conversion...")
-                excel_name, excel_data, meta, summary = convert_bytes_to_excel(
-                    file_bytes, uf.name
-                )
-                log.append(f"SUCCESS -> {excel_name} ({len(excel_data)} bytes)")
-                log.append(f"Data rows: {summary['data_rows']}  |  Columns: {summary['columns']}")
-                log.append(f"Sheet: {summary['sheet_name']}")
-                log.append(f"Verification entries: {summary['verification_entries']}")
-                for k, v in meta.items():
-                    log.append(f"  {k}: {v}")
-
-                # Auto-save
+        if not valid_files:
+            st.warning("No valid files found in upload.")
+        else:
+            for uf in valid_files:
                 try:
-                    output_dir = Path(os.environ.get("DOMINO_WORKING_DIR", ".")) / "output"
-                    output_dir.mkdir(parents=True, exist_ok=True)
-                    (output_dir / excel_name).write_bytes(excel_data)
-                    log.append(f"Saved to: {output_dir / excel_name}")
-                except Exception as save_err:
-                    log.append(f"Could not auto-save: {save_err}")
+                    file_bytes = uf.getvalue()
+                    st.text(f"DEBUG: got {len(file_bytes)} bytes from {uf.name}")
 
-            except Exception as e:
-                log.append(f"CONVERSION ERROR: {type(e).__name__}: {e}")
-                log.append(traceback.format_exc())
+                    excel_name, excel_data, meta, summary = convert_bytes_to_excel(
+                        file_bytes, uf.name
+                    )
+                    st.text(f"DEBUG: conversion OK -> {excel_name} ({len(excel_data)} bytes)")
 
-            # Render everything in ONE st.code block
-            st.code("\n".join(log), language=None)
+                    # Auto-save
+                    try:
+                        output_dir = Path(os.environ.get("DOMINO_WORKING_DIR", ".")) / "output"
+                        output_dir.mkdir(parents=True, exist_ok=True)
+                        save_path = output_dir / excel_name
+                        save_path.write_bytes(excel_data)
+                        st.text(f"DEBUG: saved to {save_path}")
+                    except Exception as save_err:
+                        st.text(f"DEBUG: save failed: {save_err}")
 
-            # Download button (only if conversion succeeded)
-            if excel_data is not None:
-                st.download_button(
-                    label="Download " + excel_name,
-                    data=excel_data,
-                    file_name=excel_name,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_" + uf.name,
-                )
+                    st.success(f"Converted: {uf.name} -> {excel_name}")
+                    st.download_button(
+                        label="Download " + excel_name,
+                        data=excel_data,
+                        file_name=excel_name,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="dl_" + str(idx) + "_" + uf.name,
+                    )
+
+                except Exception as e:
+                    st.text(f"DEBUG: EXCEPTION: {type(e).__name__}: {e}")
+                    st.text(traceback.format_exc())
+
+        st.text("DEBUG: === END OF CONVERTER ===")
     else:
         st.info("Upload one or more raw log data files to begin.")
 
