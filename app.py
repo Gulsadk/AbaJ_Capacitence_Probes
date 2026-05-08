@@ -1055,9 +1055,19 @@ elif page == "3️⃣ Drift Check":
                 """)
 
 
-# ── Footer ───────────────────────────────────────────────────────────────
+# ── Footer (shown on every page) ─────────────────────────────────────────
 st.sidebar.markdown("---")
 st.sidebar.markdown(
     "<div style='font-size:11px; color:#999; text-align:center;'>"
     "Capacitance Probe Tools<br>MS&T Labs</div>",
     unsafe_allow_html=True)
+
+st.markdown(
+    "<div style='text-align:center; color:#999; font-size:12px; "
+    "margin-top:40px; border-top:1px solid #eee; padding-top:12px;'>"
+    "For questions or suggestions, reach out to "
+    "<b>Gulsad Kucuk</b> — "
+    "<a href='mailto:gulsad.kucuk@bms.com'>gulsad.kucuk@bms.com</a>"
+    "</div>",
+    unsafe_allow_html=True,
+)
