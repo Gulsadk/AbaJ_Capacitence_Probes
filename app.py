@@ -14,6 +14,7 @@ Local:   streamlit run app.py
 import io
 import os
 import re
+import traceback
 from datetime import time as dt_time
 from pathlib import Path
 
@@ -579,16 +580,25 @@ elif page == "1️⃣ Convert (CSV → Excel)":
     if uploaded_files:
         st.divider()
         results = []
+        log_lines = []
         progress_bar = st.progress(0)
 
         for i, uf in enumerate(uploaded_files):
+            log_lines.append(f"--- Processing: {uf.name} ({len(uf.getvalue())} bytes) ---")
             try:
                 fb = uf.read()
+                log_lines.append(f"  Read {len(fb)} bytes, calling converter...")
                 out_name, excel_bytes, meta, summary = convert_bytes_to_excel(fb, uf.name)
+                log_lines.append(f"  OK → {out_name} ({len(excel_bytes)} bytes)")
+                log_lines.append(f"  Metadata: {meta}")
+                log_lines.append(f"  Summary: {summary}")
                 results.append({"status": "ok", "input": uf.name, "output_name": out_name,
                                 "excel_bytes": excel_bytes, "metadata": meta, "summary": summary})
             except Exception as e:
-                results.append({"status": "error", "input": uf.name, "error": str(e)})
+                tb = traceback.format_exc()
+                log_lines.append(f"  ERROR: {e}")
+                log_lines.append(tb)
+                results.append({"status": "error", "input": uf.name, "error": str(e), "traceback": tb})
             progress_bar.progress((i + 1) / len(uploaded_files))
 
         ok = [r for r in results if r["status"] == "ok"]
@@ -597,11 +607,17 @@ elif page == "1️⃣ Convert (CSV → Excel)":
         # Auto-save to output folder
         output_dir = Path(os.environ.get("DOMINO_WORKING_DIR", ".")) / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
+        saved_paths = []
         for r in ok:
-            (output_dir / r["output_name"]).write_bytes(r["excel_bytes"])
+            p = output_dir / r["output_name"]
+            p.write_bytes(r["excel_bytes"])
+            saved_paths.append(str(p))
+            log_lines.append(f"  Saved: {p}")
 
         if ok:
-            st.success(f"Converted {len(ok)} file(s) — saved to `{output_dir}/`")
+            st.success(f"Converted {len(ok)} file(s)")
+            for sp in saved_paths:
+                st.text(f"  📄 Saved: {sp}")
         if err:
             st.error(f"Failed: {len(err)} file(s)")
 
@@ -617,12 +633,30 @@ elif page == "1️⃣ Convert (CSV → Excel)":
                     st.text(f"  Columns: {s['columns']}  |  Data rows: {s['data_rows']}")
                     st.text(f"  Sheet: {s['sheet_name']}")
                     st.text(f"  Verification entries: {s['verification_entries']}")
+
+                # Preview the converted Excel content
+                with st.expander("Preview converted data"):
+                    try:
+                        preview_xls = pd.ExcelFile(io.BytesIO(r["excel_bytes"]))
+                        for sn in preview_xls.sheet_names:
+                            st.markdown(f"**Sheet: {sn}**")
+                            df_preview = pd.read_excel(preview_xls, sheet_name=sn, header=None)
+                            st.dataframe(df_preview, use_container_width=True, height=250)
+                    except Exception as pe:
+                        st.warning(f"Could not preview: {pe}")
+
                 st.download_button(f"⬇ Download {r['output_name']}", r["excel_bytes"],
                                    r["output_name"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                    key=f"dl_{r['input']}")
         for r in err:
-            with st.expander(f"❌  {r['input']}", expanded=True):
+            with st.expander(f"❌  {r['input']}  — ERROR", expanded=True):
                 st.error(r["error"])
+                if r.get("traceback"):
+                    st.code(r["traceback"], language="python")
+
+        # Log panel
+        with st.expander("📋 Processing Log", expanded=False):
+            st.code("\n".join(log_lines), language="text")
 
         st.info("✅ Done! Proceed to **Step 2** (Verification Plot) using the sidebar.")
     else:
